@@ -20,17 +20,18 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Grant execute permission for gradlew
-      run: |
-        # Genera un gradle wrapper pulito se manca
-        npx -y gradle-wrapper-generator || true
-        gradle wrapper --gradle-version 8.5
-        chmod +x gradlew
+    - name: Set up Gradle 8.5
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.5'
 
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: gradle assembleDebug --stacktrace
       env:
-        ANDROID_HOME: ${{ steps.setup-android.outputs.android-home }}
+        ORG_GRADLE_PROJECT_android_injected_invokedFromIde: true
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TradingAnalysisApp-Android15
+        path: app/build/outputs/apk/debug/app-debug.apk
