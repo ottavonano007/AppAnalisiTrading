@@ -22,24 +22,14 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Accept Android SDK Licenses
-      run: yes | sdkmanager --licenses || true
+    - name: Setup Gradle Engine
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.5'
 
-    - name: Install Gradle 8.5 & Generate Wrapper
+    - name: Generate Wrapper and Compile APK
       run: |
-        wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-        unzip -q gradle-8.5-bin.zip
-        sudo mv gradle-8.5 /opt/gradle
-        sudo ln -sf /opt/gradle/bin/gradle /usr/bin/gradle
         gradle wrapper --gradle-version 8.5
         chmod +x gradlew
-
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
-
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: TradingAnalysisApp-Android15
-        path: app/build/outputs/apk/debug/app-debug.apk
+        ./gradlew assembleDebug --stacktrace
 
