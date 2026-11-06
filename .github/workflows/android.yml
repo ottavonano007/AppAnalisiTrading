@@ -1,1 +1,34 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main" ] # Cambia in "master" se il tuo branch principale si chiama così
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout del codice
+      uses: actions/checkout@v4
+
+    - name: Configura Java JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17' # Modifica in '11' o '21' a seconda dei requisiti del tuo progetto
+
+    - name: Concedi i permessi di esecuzione a Gradle
+      run: chmod +x gradlew
+
+    - name: Compila l'APK (Debug)
+      run: ./gradlew assembleDebug
+
+    - name: Salva l'APK come file scaricabile
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk-di-debug
+        path: app/build/outputs/apk/debug/app-debug.apk
 
