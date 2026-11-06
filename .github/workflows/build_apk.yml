@@ -1,3 +1,4 @@
+
 name: Build Android APK (Android 15)
 
 on:
@@ -22,14 +23,26 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Setup Gradle Engine
+    - name: Accept SDK Licenses & Install API 35
+      run: |
+        yes | sdkmanager --licenses || true
+        sdkmanager "platforms;android-35" "build-tools;34.0.0" "platform-tools"
+
+    - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
       with:
         gradle-version: '8.5'
 
-    - name: Generate Wrapper and Compile APK
+    - name: Generate Wrapper & Build APK
       run: |
         gradle wrapper --gradle-version 8.5
         chmod +x gradlew
         ./gradlew assembleDebug --stacktrace
+      env:
+        ANDROID_HOME: ${{ steps.setup-android.outputs.android-home }}
 
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TradingAnalysisApp-Android15
+        path: app/build/outputs/apk/debug/app-debug.apk
