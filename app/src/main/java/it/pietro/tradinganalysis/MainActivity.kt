@@ -24,10 +24,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import it.pietro.tradinganalysis.data.LocalStore
+import it.pietro.tradinganalysis.data.ApiKeyStore
+import it.pietro.tradinganalysis.data.AlphaVantageDataSource
+import it.pietro.tradinganalysis.data.FallbackMarketDataSource
 import it.pietro.tradinganalysis.data.StooqDataSource
+import it.pietro.tradinganalysis.data.YahooFinanceDataSource
 import it.pietro.tradinganalysis.domain.*
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
@@ -37,13 +42,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = LocalStore(applicationContext)
-        setContent { TradingApp(store) }
+        val apiKeyStore = ApiKeyStore(applicationContext)
+        setContent { TradingApp(store, apiKeyStore) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TradingApp(store: LocalStore) {
+private fun TradingApp(store: LocalStore, apiKeyStore: ApiKeyStore) {
     val colors = darkColorScheme(
         primary = androidx.compose.ui.graphics.Color(0xFF70D6B0),
         secondary = androidx.compose.ui.graphics.Color(0xFF91A9FF),
@@ -67,8 +73,10 @@ private fun TradingApp(store: LocalStore) {
         var loading by remember { mutableStateOf(false) }
         var showPortfolioDialog by remember { mutableStateOf(false) }
         var newPortfolioName by remember { mutableStateOf("") }
+        var showProviderSettings by remember { mutableStateOf(false) }
+        var alphaApiKey by remember { mutableStateOf(apiKeyStore.read().orEmpty()) }
         val scope = rememberCoroutineScope()
-        val source = remember { StooqDataSource() }
+        
 
         fun analyze(target: String = symbol) {
             val clean = target.trim().uppercase()
@@ -80,15 +88,21 @@ private fun TradingApp(store: LocalStore) {
                 return
             }
             loading = true
-            status = "Recupero dati giornalieri da Stooq…"
+            status = "Recupero dati giornalieri: Stooq → Yahoo Finance → Alpha Vantage…"
             scope.launch {
-                val result = source.loadDaily(clean)
-                result.onSuccess { values ->
+                val providers = buildList {
+                    add(StooqDataSource())
+                    add(YahooFinanceDataSource())
+                    if (alphaApiKey.isNotBlank()) add(AlphaVantageDataSource(alphaApiKey))
+                }
+                val result = FallbackMarketDataSource(providers).loadDaily(clean)
+                result.onSuccess { data ->
+                    val values = data.candles
                     val computed = TechnicalAnalysis.calculate(values)
                     candles = values
                     snapshot = computed
                     analyzedSymbol = clean
-                    status = if (computed != null) "Dati ricevuti. Ultima sessione: ${computed.lastDate}." else "Dati insufficienti per l'analisi."
+                    status = if (computed != null) "Fonte: ${data.provider}. Ultima sessione: ${computed.lastDate}." + (data.note?.let { " $it." } ?: "") else "Dati insufficienti per l'analisi. Fonte: ${data.provider}."
                     if (computed != null) {
                         val summary = "Chiusura ${fmt(computed.lastClose)} · ${computed.observations} osservazioni · RSI ${computed.rsi14?.let { fmt(it) } ?: "n/d"}"
                         val record = AnalysisRecord(System.currentTimeMillis(), clean, market.label, level.label,
@@ -120,6 +134,7 @@ private fun TradingApp(store: LocalStore) {
                     0 -> MarketScreen(
                         symbol, { symbol = it }, market, { market = it }, level, { level = it }, mode, { mode = it },
                         loading, status, snapshot, candles, analyzedSymbol, ::analyze,
+                        onProviderSettings = { showProviderSettings = true },
                         addToPortfolio = {
                             val updated = portfolios.toMutableMap()
                             updated[selectedPortfolio] = (updated[selectedPortfolio].orEmpty() + symbol.trim().uppercase()).distinct()
@@ -137,6 +152,40 @@ private fun TradingApp(store: LocalStore) {
                     else -> HistoryScreen(history, onOpen = { symbol = it; market = MarketType.STOCK; tab = 0; analyze(it) })
                 }
             }
+        }
+        if (showProviderSettings) {
+            AlertDialog(
+                onDismissRequest = { showProviderSettings = false },
+                title = { Text("Fonti dati") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Ordine automatico: Stooq, Yahoo Finance, Alpha Vantage.", style = MaterialTheme.typography.bodyMedium)
+                        Text("Yahoo Finance usa un'interfaccia non ufficiale e non documentata.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedTextField(
+                            value = alphaApiKey,
+                            onValueChange = { alphaApiKey = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Chiave API Alpha Vantage") },
+                            placeholder = { Text("Inserisci la tua API key") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation()
+                        )
+                        Text("La chiave viene salvata sul dispositivo, cifrata con Android Keystore. Non viene inserita nel repository. L'uso in un'app client non la rende completamente segreta.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Alpha Vantage usa TIME_SERIES_DAILY in modalità compact (ultimi 100 dati giornalieri).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        apiKeyStore.save(alphaApiKey)
+                        alphaApiKey = apiKeyStore.read().orEmpty()
+                        showProviderSettings = false
+                        status = if (alphaApiKey.isBlank()) "Chiave Alpha Vantage rimossa. Verranno provate Stooq e Yahoo Finance." else "Chiave Alpha Vantage salvata sul dispositivo. Verrà usata come terza fonte."
+                    }) { Text("Salva") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { alphaApiKey = apiKeyStore.read().orEmpty(); showProviderSettings = false }) { Text("Annulla") }
+                }
+            )
         }
         if (showPortfolioDialog) {
             AlertDialog(onDismissRequest = { showPortfolioDialog = false },
@@ -173,7 +222,7 @@ private fun MarketScreen(
     symbol: String, onSymbol: (String) -> Unit, market: MarketType, onMarket: (MarketType) -> Unit,
     level: AnalysisLevel, onLevel: (AnalysisLevel) -> Unit, mode: AnalysisMode, onMode: (AnalysisMode) -> Unit,
     loading: Boolean, status: String, snapshot: TechnicalSnapshot?, candles: List<Candle>, analyzedSymbol: String,
-    onAnalyze: (String) -> Unit, addToPortfolio: () -> Unit
+    onAnalyze: (String) -> Unit, onProviderSettings: () -> Unit, addToPortfolio: () -> Unit
 ) {
     LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -190,7 +239,8 @@ private fun MarketScreen(
                 OutlinedTextField(value = symbol, onValueChange = onSymbol, modifier = Modifier.fillMaxWidth(),
                     label = { Text("Ticker / simbolo") }, placeholder = { Text("Es. AAPL") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters))
-                Text("Fonte attuale: Stooq · copertura iniziale: titoli azionari USA · dati giornalieri", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Fonti in sequenza: Stooq → Yahoo Finance → Alpha Vantage · dati giornalieri", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onClick = onProviderSettings, modifier = Modifier.fillMaxWidth()) { Text("Configura Alpha Vantage") }
                 Button(onClick = { onAnalyze(symbol) }, enabled = !loading && symbol.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                     if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Avvia analisi")
                 }
@@ -359,7 +409,7 @@ private fun StatusCard(text: String) { CardBlock { SelectionContainer { Column {
 private fun Disclaimer() {
     CardBlock {
         Text("Trasparenza e limiti", fontWeight = FontWeight.SemiBold)
-        Text("Questa versione usa dati storici giornalieri pubblici Stooq, quando disponibili. Non fornisce quotazioni real-time, order book, flussi buy/sell istituzionali, open interest o fondamentali certificati. I dati assenti sono mostrati come N/D.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Questa versione prova in sequenza Stooq, Yahoo Finance e Alpha Vantage (se configurato). Yahoo Finance utilizza un'interfaccia non ufficiale e non documentata. Sono dati storici giornalieri, non quotazioni real-time. Non fornisce order book, flussi buy/sell istituzionali, open interest o fondamentali certificati. I dati assenti sono mostrati come N/D.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Strumento informativo e didattico: non è consulenza finanziaria. Nessun ordine reale viene eseguito.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
