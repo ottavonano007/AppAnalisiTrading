@@ -145,7 +145,7 @@ private fun TradingApp(store: LocalStore, apiKeyStore: ApiKeyStore) {
                             status = "${symbol.uppercase()} aggiunto a $selectedPortfolio."
                         }
                     )
-                    1 -> PortfolioScreen(portfolios, selectedPortfolio, { selectedPortfolio = it },
+                    1 -> PortfolioScreen(portfolios, selectedPortfolio, alphaApiKey, { selectedPortfolio = it },
                         onCreate = { showPortfolioDialog = true }, onRemove = { name, ticker ->
                             val updated = portfolios.toMutableMap()
                             updated[name] = updated[name].orEmpty() - ticker
@@ -564,19 +564,55 @@ private fun movingAverageSeries(values: List<Double>, period: Int, exponential: 
 }
 
 @Composable
-private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: String, onSelect: (String) -> Unit,
-                            onCreate: () -> Unit, onRemove: (String, String) -> Unit, onAnalyze: (String) -> Unit) {
+private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: String, alphaApiKey: String,
+                            onSelect: (String) -> Unit, onCreate: () -> Unit,
+                            onRemove: (String, String) -> Unit, onAnalyze: (String) -> Unit) {
+    var chartView by remember { mutableStateOf(false) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Row(verticalAlignment = Alignment.CenterVertically) { SectionTitle("I tuoi portafogli"); Spacer(Modifier.weight(1f)); Button(onClick = onCreate) { Text("+ Nuovo") } } }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { portfolios.keys.forEach { name -> FilterChip(selected = selected == name, onClick = { onSelect(name) }, label = { Text(name) }) } } }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("I tuoi portafogli")
+                Spacer(Modifier.weight(1f))
+                Button(onClick = onCreate) { Text("+ Nuovo") }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                portfolios.keys.forEach { name ->
+                    FilterChip(selected = selected == name, onClick = { onSelect(name) }, label = { Text(name) })
+                }
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Visualizzazione", style = MaterialTheme.typography.labelLarge)
+                FilterChip(selected = !chartView, onClick = { chartView = false }, label = { Text("Elenco") })
+                FilterChip(selected = chartView, onClick = { chartView = true }, label = { Text("Grafici") })
+            }
+        }
         val symbols = portfolios[selected].orEmpty()
-        if (symbols.isEmpty()) item { CardBlock { Text("Portafoglio vuoto", fontWeight = FontWeight.SemiBold); Text("Aggiungi strumenti dalla sezione Mercati per creare il tuo elenco di osservazione.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-        items(symbols) { ticker ->
-            CardBlock {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium); Text("Dato non aggiornato finché non avvii l'analisi", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    TextButton(onClick = { onAnalyze(ticker) }) { Text("Scheda tecnica") }
-                    TextButton(onClick = { onRemove(selected, ticker) }) { Text("Rimuovi") }
+        if (symbols.isEmpty()) {
+            item {
+                CardBlock {
+                    Text("Portafoglio vuoto", fontWeight = FontWeight.SemiBold)
+                    Text("Aggiungi strumenti dalla sezione Mercati per creare il tuo elenco di osservazione.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else if (chartView) {
+            items(symbols, key = { "chart-$it" }) { ticker ->
+                PortfolioChartCard(ticker, alphaApiKey, onAnalyze, onRemove = { onRemove(selected, ticker) })
+            }
+        } else {
+            items(symbols, key = { "list-$it" }) { ticker ->
+                CardBlock {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text("Dato non aggiornato finché non avvii l'analisi", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { onAnalyze(ticker) }) { Text("Scheda tecnica") }
+                        TextButton(onClick = { onRemove(selected, ticker) }) { Text("Rimuovi") }
+                    }
                 }
             }
         }
@@ -584,6 +620,89 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
     }
 }
 
+@Composable
+private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (String) -> Unit, onRemove: () -> Unit) {
+    var candles by remember(ticker, alphaApiKey) { mutableStateOf<List<Candle>>(emptyList()) }
+    var provider by remember(ticker, alphaApiKey) { mutableStateOf("") }
+    var error by remember(ticker, alphaApiKey) { mutableStateOf<String?>(null) }
+    var loading by remember(ticker, alphaApiKey) { mutableStateOf(true) }
+
+    LaunchedEffect(ticker, alphaApiKey) {
+        loading = true
+        error = null
+        val providers = buildList {
+            add(StooqDataSource())
+            add(YahooFinanceDataSource())
+            if (alphaApiKey.isNotBlank()) add(AlphaVantageDataSource(alphaApiKey))
+        }
+        FallbackMarketDataSource(providers).loadDaily(ticker).onSuccess { data ->
+            candles = data.candles
+            provider = data.provider
+            if (data.candles.size < 2) error = "Storico insufficiente per il grafico."
+        }.onFailure { cause ->
+            error = cause.message ?: "Dati non disponibili."
+        }
+        loading = false
+    }
+
+    val visible = candles.takeLast(60)
+    val firstClose = visible.firstOrNull()?.close
+    val lastClose = visible.lastOrNull()?.close
+    val change = if (firstClose != null && firstClose != 0.0 && lastClose != null) (lastClose / firstClose - 1.0) * 100.0 else null
+    CardBlock {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text(if (provider.isNotBlank()) "Fonte: $provider · \${visible.size} sedute" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (lastClose != null) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(fmt(lastClose), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    if (change != null) Text(
+                        "\${if (change >= 0) "+" else ""}\${fmt(change)}% · periodo mostrato",
+                        color = if (change >= 0) Color(0xFF81C784) else Color(0xFFE57373),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+        when {
+            loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text("Caricamento dello storico…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            error != null -> Text("Grafico non disponibile: $error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            visible.size > 1 -> {
+                PortfolioMiniChart(visible)
+                Text("Ultime \${visible.size} sedute · dati giornalieri, non in tempo reale", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = onRemove) { Text("Rimuovi") }
+            TextButton(onClick = { onAnalyze(ticker) }) { Text("Scheda tecnica") }
+        }
+    }
+}
+
+@Composable
+private fun PortfolioMiniChart(candles: List<Candle>) {
+    val closes = candles.map { it.close }
+    val min = closes.minOrNull() ?: return
+    val max = closes.maxOrNull() ?: return
+    val range = (max - min).takeIf { it > 0.0 } ?: 1.0
+    val lineColor = MaterialTheme.colorScheme.primary
+    Canvas(Modifier.fillMaxWidth().height(104.dp).padding(vertical = 6.dp)) {
+        val points = closes.mapIndexed { index, value ->
+            Offset(
+                x = size.width * index / (closes.size - 1).coerceAtLeast(1),
+                y = size.height - ((value - min) / range).toFloat() * size.height
+            )
+        }
+        points.zipWithNext().forEach { (a, b) ->
+            drawLine(lineColor, a, b, strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
+        }
+    }
+}
 @Composable
 private fun HistoryScreen(history: List<AnalysisRecord>, onOpen: (String) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
