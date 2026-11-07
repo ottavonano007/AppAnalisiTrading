@@ -565,7 +565,17 @@ private fun movingAverageSeries(values: List<Double>, period: Int, exponential: 
     return output
 }
 
-private enum class PortfolioChartWindow(val label: String, val sessions: Int?) {
+private enum class PortfolioChartWindow(
+    val label: String,
+    val sessions: Int?,
+    val intradayRange: String? = null,
+    val intradayInterval: String? = null
+) {
+    HOUR("Ora", null, "1d", "1m"),
+    TWELVE_HOURS("12 ore", null, "5d", "5m"),
+    DAY("Giorno", null, "1mo", "15m"),
+    WEEK("Settimana", null, "1mo", "60m"),
+    FIFTEEN_DAYS("15 giorni", null, "3mo", "60m"),
     MONTH("1M", 21), THREE_MONTHS("3M", 63), SIX_MONTHS("6M", 126),
     YEAR("1A", 252), THREE_YEARS("3A", 756), FIVE_YEARS("5A", 1260), ALL("Tutto", null)
 }
@@ -608,6 +618,16 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
                 CardBlock {
                     Text("Periodo del grafico", fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(PortfolioChartWindow.HOUR, PortfolioChartWindow.TWELVE_HOURS, PortfolioChartWindow.DAY).forEach {
+                            FilterChip(selected = chartWindow == it, onClick = { chartWindow = it }, label = { Text(it.label) })
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(PortfolioChartWindow.WEEK, PortfolioChartWindow.FIFTEEN_DAYS).forEach {
+                            FilterChip(selected = chartWindow == it, onClick = { chartWindow = it }, label = { Text(it.label) })
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         listOf(PortfolioChartWindow.MONTH, PortfolioChartWindow.THREE_MONTHS, PortfolioChartWindow.SIX_MONTHS, PortfolioChartWindow.YEAR).forEach {
                             FilterChip(selected = chartWindow == it, onClick = { chartWindow = it }, label = { Text(it.label) })
                         }
@@ -628,7 +648,7 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
                             FilterChip(selected = chartStyle == it, onClick = { chartStyle = it }, label = { Text(it.label) })
                         }
                     }
-                    Text("Asse X: tempo · Asse Y: prezzo nella valuta di quotazione.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Asse X: tempo · Asse Y: prezzo nella valuta di quotazione. Le finestre intraday usano Yahoo Finance.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -676,25 +696,32 @@ private fun PortfolioChartCard(
     var error by remember(ticker, alphaApiKey) { mutableStateOf<String?>(null) }
     var loading by remember(ticker, alphaApiKey) { mutableStateOf(true) }
 
-    LaunchedEffect(ticker, alphaApiKey) {
+    LaunchedEffect(ticker, alphaApiKey, chartWindow) {
         loading = true
         error = null
-        val providers = buildList {
-            add(StooqDataSource())
-            add(YahooFinanceDataSource())
-            if (alphaApiKey.isNotBlank()) add(AlphaVantageDataSource(alphaApiKey))
+        val result = if (chartWindow.intradayRange != null && chartWindow.intradayInterval != null) {
+            YahooFinanceDataSource().loadIntraday(ticker, chartWindow.intradayRange, chartWindow.intradayInterval)
+        } else {
+            val providers = buildList {
+                add(StooqDataSource())
+                add(YahooFinanceDataSource())
+                if (alphaApiKey.isNotBlank()) add(AlphaVantageDataSource(alphaApiKey))
+            }
+            FallbackMarketDataSource(providers).loadDaily(ticker)
         }
-        FallbackMarketDataSource(providers).loadDaily(ticker).onSuccess { data ->
+        result.onSuccess { data ->
             candles = data.candles
             provider = data.provider
             if (data.candles.size < 2) error = "Storico insufficiente per il grafico."
         }.onFailure { cause ->
+            candles = emptyList()
             error = cause.message ?: "Dati non disponibili."
         }
         loading = false
     }
 
-    val visible = chartWindow.sessions?.let { candles.takeLast(it) } ?: candles
+    val visible = if (chartWindow.intradayRange != null) candles
+        else chartWindow.sessions?.let { candles.takeLast(it) } ?: candles
     val firstClose = visible.firstOrNull()?.close
     val lastClose = visible.lastOrNull()?.close
     val change = if (firstClose != null && firstClose != 0.0 && lastClose != null) (lastClose / firstClose - 1.0) * 100.0 else null
@@ -702,7 +729,7 @@ private fun PortfolioChartCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(if (provider.isNotBlank()) "Fonte: $provider · ${visible.size} sedute" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (provider.isNotBlank()) "Fonte: $provider · ${visible.size} intervalli" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (lastClose != null) {
                 Column(horizontalAlignment = Alignment.End) {
@@ -723,7 +750,7 @@ private fun PortfolioChartCard(
             error != null -> Text("Grafico non disponibile: $error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             visible.size > 1 -> {
                 PortfolioFinancialChart(visible, chartStyle)
-                Text("Periodo: ${visible.first().date} – ${visible.last().date} · ${visible.size} sedute", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Periodo: ${visible.first().date} – ${visible.last().date} · ${visible.size} intervalli", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
