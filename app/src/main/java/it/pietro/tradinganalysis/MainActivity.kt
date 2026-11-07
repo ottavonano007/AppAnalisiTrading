@@ -569,13 +569,14 @@ private enum class PortfolioChartWindow(
     val label: String,
     val sessions: Int?,
     val intradayRange: String? = null,
-    val intradayInterval: String? = null
+    val intradayInterval: String? = null,
+    val intradayHours: Long? = null
 ) {
-    HOUR("Ora", null, "1d", "1m"),
-    TWELVE_HOURS("12 ore", null, "5d", "5m"),
-    DAY("Giorno", null, "1mo", "15m"),
-    WEEK("Settimana", null, "1mo", "60m"),
-    FIFTEEN_DAYS("15 giorni", null, "3mo", "60m"),
+    HOUR("Ora", null, "1d", "1m", 1),
+    TWELVE_HOURS("12 ore", null, "5d", "5m", 12),
+    DAY("Giorno", null, "1mo", "15m", 24),
+    WEEK("Settimana", null, "1mo", "60m", 24 * 7),
+    FIFTEEN_DAYS("15 giorni", null, "3mo", "60m", 24 * 15),
     MONTH("1M", 21), THREE_MONTHS("3M", 63), SIX_MONTHS("6M", 126),
     YEAR("1A", 252), THREE_YEARS("3A", 756), FIVE_YEARS("5A", 1260), ALL("Tutto", null)
 }
@@ -720,8 +721,12 @@ private fun PortfolioChartCard(
         loading = false
     }
 
-    val visible = if (chartWindow.intradayRange != null) candles
-        else chartWindow.sessions?.let { candles.takeLast(it) } ?: candles
+    val visible = if (chartWindow.intradayHours != null) {
+        val cutoff = java.time.Instant.now().minusSeconds(chartWindow.intradayHours * 3600)
+        candles.filter { candle ->
+            runCatching { java.time.Instant.parse(candle.date).isAfter(cutoff) }.getOrDefault(false)
+        }
+    } else chartWindow.sessions?.let { candles.takeLast(it) } ?: candles
     val firstClose = visible.firstOrNull()?.close
     val lastClose = visible.lastOrNull()?.close
     val change = if (firstClose != null && firstClose != 0.0 && lastClose != null) (lastClose / firstClose - 1.0) * 100.0 else null
@@ -849,13 +854,20 @@ private fun PortfolioFinancialChart(candles: List<Candle>, style: PortfolioChart
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(plotted.first().date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(formatChartDate(plotted.first().date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Tempo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(plotted.last().date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(formatChartDate(plotted.last().date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("Valore: prezzo nella valuta di quotazione", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+private fun formatChartDate(value: String): String =
+    runCatching {
+        java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm")
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(java.time.Instant.parse(value))
+    }.getOrDefault(value)
+
 @Composable
 private fun HistoryScreen(history: List<AnalysisRecord>, onOpen: (String) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
