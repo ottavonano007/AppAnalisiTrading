@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
@@ -251,29 +252,34 @@ private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles
 @Composable
 private fun SnapshotCard(symbol: String, s: TechnicalSnapshot, candles: List<Candle>, level: AnalysisLevel) {
     CardBlock {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text(symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Ultima data: ${s.lastDate}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-            Text("${fmt(s.lastClose)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        SelectionContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { Text(symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Ultima data: ${s.lastDate}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+                    Text("${fmt(s.lastClose)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                }
+                MetricGrid(when (level) {
+                    AnalysisLevel.BASE -> metricValues(s).take(3)
+                    AnalysisLevel.ADVANCED -> metricValues(s).take(6)
+                    AnalysisLevel.EXPERT -> metricValues(s)
+                })
+                Text("Indicatori descrittivi, non segnali automatici di acquisto o vendita.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         if (candles.size > 1) PriceLine(candles.takeLast(60).map { it.close })
-        val metrics = listOf(
-            "Variazione" to s.changePercent?.let { "${fmt(it)}%" },
-            "RSI (14)" to s.rsi14?.let(::fmt),
-            "Media 20" to s.sma20?.let(::fmt),
-            "Media 50" to s.sma50?.let(::fmt),
-            "Volatilità ann." to s.annualizedVolatility?.let { "${fmt(it)}%" },
-            "Volume / media 20g" to s.volumeVs20DayAverage?.let { "${fmt(it)}x" },
-            "Max drawdown" to s.maxDrawdown?.let { "${fmt(it)}%" },
-            "Osservazioni" to s.observations.toString()
-        )
-        MetricGrid(when (level) {
-            AnalysisLevel.BASE -> metrics.take(3)
-            AnalysisLevel.ADVANCED -> metrics.take(6)
-            AnalysisLevel.EXPERT -> metrics
-        })
-        Text("Indicatori descrittivi, non segnali automatici di acquisto o vendita.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+private fun metricValues(s: TechnicalSnapshot): List<Pair<String, String?>> = listOf(
+    "Variazione" to s.changePercent?.let { "${fmt(it)}%" },
+    "RSI (14)" to s.rsi14?.let(::fmt),
+    "Media 20" to s.sma20?.let(::fmt),
+    "Media 50" to s.sma50?.let(::fmt),
+    "Volatilità ann." to s.annualizedVolatility?.let { "${fmt(it)}%" },
+    "Volume / media 20g" to s.volumeVs20DayAverage?.let { "${fmt(it)}x" },
+    "Max drawdown" to s.maxDrawdown?.let { "${fmt(it)}%" },
+    "Osservazioni" to s.observations.toString()
+)
 
 @Composable
 private fun MetricGrid(values: List<Pair<String, String?>>) {
@@ -347,7 +353,7 @@ private fun HistoryScreen(history: List<AnalysisRecord>, onOpen: (String) -> Uni
 }
 
 @Composable
-private fun StatusCard(text: String) { CardBlock { Text("Stato dei dati", fontWeight = FontWeight.SemiBold); Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+private fun StatusCard(text: String) { CardBlock { SelectionContainer { Column { Text("Stato dei dati", fontWeight = FontWeight.SemiBold); Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) } } } }
 
 @Composable
 private fun Disclaimer() {
