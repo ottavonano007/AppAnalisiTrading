@@ -572,11 +572,11 @@ private enum class PortfolioChartWindow(
     val intradayInterval: String? = null,
     val intradayHours: Long? = null
 ) {
-    HOUR("Ora", null, "1d", "1m", 1),
-    TWELVE_HOURS("12 ore", null, "5d", "5m", 12),
-    DAY("Giorno", null, "1mo", "15m", 24),
-    WEEK("Settimana", null, "1mo", "60m", 24 * 7),
-    FIFTEEN_DAYS("15 giorni", null, "3mo", "60m", 24 * 15),
+    HOUR("Ora", null, "1d", "1m", 1L),
+    TWELVE_HOURS("12 ore", null, "5d", "5m", 12L),
+    DAY("Giorno", null, "1mo", "15m", 24L),
+    WEEK("Settimana", null, "1mo", "60m", 24L * 7),
+    FIFTEEN_DAYS("15 giorni", null, "3mo", "60m", 24L * 15),
     MONTH("1M", 21), THREE_MONTHS("3M", 63), SIX_MONTHS("6M", 126),
     YEAR("1A", 252), THREE_YEARS("3A", 756), FIVE_YEARS("5A", 1260), ALL("Tutto", null)
 }
