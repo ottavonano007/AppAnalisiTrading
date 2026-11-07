@@ -47,7 +47,7 @@ class AlphaVantageDataSource(private val apiKey: String) : MarketDataSource {
                     if (listOf(open, high, low, close, volume).any { !it.isFinite() } ||
                         close <= 0.0 || high < low || open !in low..high || close !in low..high) return@mapNotNull null
                     Candle(date, open, high, low, close, volume.coerceAtLeast(0.0))
-                }.sortedBy { it.date }
+                }.sortedBy { it.date }.toList()
                 check(candles.isNotEmpty()) { "Alpha Vantage ha restituito una serie vuota o non valida" }
                 MarketDataResult(candles, "Alpha Vantage")
             } finally {
