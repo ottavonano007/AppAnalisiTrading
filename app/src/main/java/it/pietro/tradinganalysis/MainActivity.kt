@@ -310,9 +310,10 @@ private fun SnapshotCard(symbol: String, s: TechnicalSnapshot, candles: List<Can
                 }
                 MetricGrid(when (level) {
                     AnalysisLevel.BASE -> metricValues(s).take(3)
-                    AnalysisLevel.ADVANCED -> metricValues(s).take(6)
+                    AnalysisLevel.ADVANCED -> metricValues(s).take(10)
                     AnalysisLevel.EXPERT -> metricValues(s)
                 })
+                if (level != AnalysisLevel.BASE) MovingAveragePanel(s)
                 Text("Indicatori descrittivi, non segnali automatici di acquisto o vendita.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -323,13 +324,54 @@ private fun SnapshotCard(symbol: String, s: TechnicalSnapshot, candles: List<Can
 private fun metricValues(s: TechnicalSnapshot): List<Pair<String, String?>> = listOf(
     "Variazione" to s.changePercent?.let { "${fmt(it)}%" },
     "RSI (14)" to s.rsi14?.let(::fmt),
-    "Media 20" to s.sma20?.let(::fmt),
-    "Media 50" to s.sma50?.let(::fmt),
+    "SMA 20" to s.sma20?.let(::fmt),
+    "SMA 50" to s.sma50?.let(::fmt),
+    "SMA 200" to s.sma200?.let(::fmt),
+    "EMA 12" to s.ema12?.let(::fmt),
+    "EMA 26" to s.ema26?.let(::fmt),
+    "MACD" to s.macd?.let(::fmt),
+    "Segnale MACD (9)" to s.macdSignal?.let(::fmt),
+    "Bollinger superiore" to s.bollingerUpper?.let(::fmt),
+    "Bollinger inferiore" to s.bollingerLower?.let(::fmt),
+    "ATR (14)" to s.atr14?.let(::fmt),
+    "Stocastico %K (14)" to s.stochasticK14?.let(::fmt),
     "Volatilità ann." to s.annualizedVolatility?.let { "${fmt(it)}%" },
     "Volume / media 20g" to s.volumeVs20DayAverage?.let { "${fmt(it)}x" },
     "Max drawdown" to s.maxDrawdown?.let { "${fmt(it)}%" },
     "Osservazioni" to s.observations.toString()
 )
+
+@Composable
+private fun MovingAveragePanel(s: TechnicalSnapshot) {
+    val rows = listOf(
+        "SMA 20" to s.sma20,
+        "SMA 50" to s.sma50,
+        "SMA 200" to s.sma200,
+        "EMA 12" to s.ema12,
+        "EMA 26" to s.ema26
+    )
+    val available = rows.filter { it.second != null }
+    val shortLong = if (s.sma50 != null && s.sma200 != null) {
+        if (s.sma50 > s.sma200) "SMA 50 sopra SMA 200" else if (s.sma50 < s.sma200) "SMA 50 sotto SMA 200" else "SMA 50 e SMA 200 allineate"
+    } else "Servono almeno 200 sedute per confrontare SMA 50 e SMA 200"
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Confronto medie mobili", fontWeight = FontWeight.SemiBold)
+        rows.forEach { (name, value) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value?.let(::fmt) ?: "N/D", fontWeight = FontWeight.SemiBold)
+                if (value != null) {
+                    val distance = (s.lastClose / value - 1.0) * 100.0
+                    Spacer(Modifier.width(8.dp))
+                    Text("${if (distance >= 0) "+" else ""}${fmt(distance)}%", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        HorizontalDivider()
+        Text(shortLong, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Le percentuali indicano la distanza della chiusura dalla media, non una previsione.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
 
 @Composable
 private fun MetricGrid(values: List<Pair<String, String?>>) {
