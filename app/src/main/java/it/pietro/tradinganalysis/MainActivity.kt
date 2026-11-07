@@ -152,7 +152,7 @@ private fun TradingApp(store: LocalStore, apiKeyStore: ApiKeyStore) {
                             updated[name] = updated[name].orEmpty() - ticker
                             portfolios = updated; store.savePortfolios(updated)
                         }, onAnalyze = { symbol = it; market = MarketType.STOCK; tab = 2; analyze(it, MarketType.STOCK) })
-                    2 -> AnalysisScreen(analyzedSymbol, snapshot, candles, level, { level = it }, mode, { mode = it }, status, ::analyze)
+                    2 -> AnalysisScreen(analyzedSymbol, snapshot, candles, level, { level = it }, mode, { mode = it }, status, alphaApiKey, ::analyze)
                     else -> HistoryScreen(history, onOpen = { symbol = it; market = MarketType.STOCK; tab = 0; analyze(it) })
                 }
             }
@@ -337,7 +337,43 @@ private fun MarketScreen(
 @Composable
 private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles: List<Candle>, level: AnalysisLevel,
                            onLevel: (AnalysisLevel) -> Unit, mode: AnalysisMode, onMode: (AnalysisMode) -> Unit,
-                           status: String, onAnalyze: (String) -> Unit) {
+                           status: String, alphaApiKey: String, onAnalyze: (String) -> Unit) {
+    var chartWindow by remember { mutableStateOf(PortfolioChartWindow.SIX_MONTHS) }
+    var chartStyle by remember { mutableStateOf(PortfolioChartStyle.CANDLE) }
+    var chartCandles by remember(symbol) { mutableStateOf(candles) }
+    var chartProvider by remember(symbol) { mutableStateOf("Storico analisi") }
+    var chartLoading by remember(symbol) { mutableStateOf(false) }
+    var chartError by remember(symbol) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(symbol, candles, alphaApiKey, chartWindow) {
+        if (chartWindow.intradayRange != null && symbol.isNotBlank()) {
+            chartLoading = true
+            chartError = null
+            val result = YahooFinanceDataSource().loadIntraday(
+                symbol, chartWindow.intradayRange, chartWindow.intradayInterval ?: "5m"
+            )
+            result.onSuccess { data ->
+                chartCandles = data.candles
+                chartProvider = data.provider
+            }.onFailure { cause ->
+                chartCandles = emptyList()
+                chartError = cause.message ?: "Dati intraday non disponibili."
+            }
+            chartLoading = false
+        } else {
+            chartCandles = candles
+            chartProvider = "Storico giornaliero"
+            chartError = null
+        }
+    }
+
+    val visibleChartCandles = if (chartWindow.intradayHours != null) {
+        val cutoff = java.time.Instant.now().minusSeconds(chartWindow.intradayHours * 3600)
+        chartCandles.filter { candle ->
+            runCatching { java.time.Instant.parse(candle.date).isAfter(cutoff) }.getOrDefault(false)
+        }
+    } else chartWindow.sessions?.let { chartCandles.takeLast(it) } ?: chartCandles
+
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { SectionTitle("Analisi tecnica") }
         item {
@@ -353,35 +389,74 @@ private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles
         }
         if (snapshot != null) item {
             Button(onClick = { onAnalyze(symbol) }, enabled = symbol.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Aggiorna analisi") }
-            SnapshotCard(symbol, snapshot, candles, level)
+            SnapshotCard(
+                symbol, snapshot, candles, level,
+                chartCandles = visibleChartCandles,
+                chartWindow = chartWindow,
+                chartStyle = chartStyle,
+                chartProvider = chartProvider,
+                chartLoading = chartLoading,
+                chartError = chartError,
+                onChartWindow = { chartWindow = it },
+                onChartStyle = { chartStyle = it }
+            )
         } else item { StatusCard("$status\nEsegui prima un'analisi dalla sezione Mercati.") }
         item { Disclaimer() }
     }
 }
 
 @Composable
-private fun SnapshotCard(symbol: String, s: TechnicalSnapshot, candles: List<Candle>, level: AnalysisLevel) {
+private fun SnapshotCard(
+    symbol: String,
+    s: TechnicalSnapshot,
+    candles: List<Candle>,
+    level: AnalysisLevel,
+    chartCandles: List<Candle> = candles,
+    chartWindow: PortfolioChartWindow = PortfolioChartWindow.SIX_MONTHS,
+    chartStyle: PortfolioChartStyle = PortfolioChartStyle.LINE,
+    chartProvider: String = "Storico giornaliero",
+    chartLoading: Boolean = false,
+    chartError: String? = null,
+    onChartWindow: ((PortfolioChartWindow) -> Unit)? = null,
+    onChartStyle: ((PortfolioChartStyle) -> Unit)? = null
+) {
     var selectedAverages by remember(symbol) { mutableStateOf(setOf<String>()) }
     val onToggleAverage: (String) -> Unit = { key ->
         selectedAverages = if (key in selectedAverages) selectedAverages - key else selectedAverages + key
     }
     CardBlock {
-        SelectionContainer {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Ultima data: ${s.lastDate}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-                    Text("${fmt(s.lastClose)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                }
-                MetricGrid(when (level) {
-                    AnalysisLevel.BASE -> metricValues(s).take(3)
-                    AnalysisLevel.ADVANCED -> metricValues(s).take(10)
-                    AnalysisLevel.EXPERT -> metricValues(s)
-                })
-                if (level != AnalysisLevel.BASE) MovingAveragePanel(s, selectedAverages, onToggleAverage)
-                Text("Indicatori descrittivi, non segnali automatici di acquisto o vendita.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Ultima data: ${s.lastDate}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
+            Text("${fmt(s.lastClose)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
-        if (candles.size > 1) PriceLine(candles, selectedAverages)
+        if (onChartWindow != null) {
+            Text("Finestra temporale", fontWeight = FontWeight.SemiBold)
+            ChartWindowSelector(chartWindow, onChartWindow)
+        }
+        if (onChartStyle != null) {
+            Text("Tipo di grafico", fontWeight = FontWeight.SemiBold)
+            ChartStyleSelector(chartStyle, onChartStyle)
+        }
+        Text("Fonte: $chartProvider", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        when {
+            chartLoading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text("Caricamento grafico…", style = MaterialTheme.typography.bodySmall)
+            }
+            chartError != null -> Text("Grafico non disponibile: $chartError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            chartCandles.size > 1 -> PortfolioFinancialChart(chartCandles, chartStyle, selectedAverages)
+            else -> Text("Storico insufficiente per il grafico selezionato.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (level != AnalysisLevel.BASE) MovingAveragePanel(s, selectedAverages, onToggleAverage)
+        Text("Indicatori descrittivi, non segnali automatici di acquisto o vendita.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        MetricGrid(when (level) {
+            AnalysisLevel.BASE -> metricValues(s).take(3)
+            AnalysisLevel.ADVANCED -> metricValues(s).take(10)
+            AnalysisLevel.EXPERT -> metricValues(s)
+        })
     }
 }
 
@@ -563,6 +638,34 @@ private fun movingAverageSeries(values: List<Double>, period: Int, exponential: 
         }
     }
     return output
+}
+
+@Composable
+private fun ChartWindowSelector(selected: PortfolioChartWindow, onSelect: (PortfolioChartWindow) -> Unit) {
+    val groups = listOf(
+        listOf(PortfolioChartWindow.HOUR, PortfolioChartWindow.TWELVE_HOURS, PortfolioChartWindow.DAY),
+        listOf(PortfolioChartWindow.WEEK, PortfolioChartWindow.FIFTEEN_DAYS, PortfolioChartWindow.MONTH),
+        listOf(PortfolioChartWindow.THREE_MONTHS, PortfolioChartWindow.SIX_MONTHS, PortfolioChartWindow.YEAR),
+        listOf(PortfolioChartWindow.THREE_YEARS, PortfolioChartWindow.FIVE_YEARS, PortfolioChartWindow.ALL)
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        groups.forEach { group ->
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                group.forEach { window ->
+                    FilterChip(selected = selected == window, onClick = { onSelect(window) }, label = { Text(window.label, fontSize = 11.sp) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartStyleSelector(selected: PortfolioChartStyle, onSelect: (PortfolioChartStyle) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        PortfolioChartStyle.values().forEach { style ->
+            FilterChip(selected = selected == style, onClick = { onSelect(style) }, label = { Text(style.label, fontSize = 11.sp) })
+        }
+    }
 }
 
 private enum class PortfolioChartWindow(
@@ -793,9 +896,17 @@ private fun displayCandles(source: List<Candle>, style: PortfolioChartStyle): Li
 }
 
 @Composable
-private fun PortfolioFinancialChart(candles: List<Candle>, style: PortfolioChartStyle) {
+private fun PortfolioFinancialChart(candles: List<Candle>, style: PortfolioChartStyle, selectedAverages: Set<String> = emptySet()) {
     val plotted = displayCandles(candles, style)
-    val values = plotted.flatMap { listOf(it.high, it.low) }
+    val closes = candles.map { it.close }
+    val overlays = buildList {
+        if ("SMA20" in selectedAverages) add("SMA20" to movingAverageSeries(closes, 20, false))
+        if ("SMA50" in selectedAverages) add("SMA50" to movingAverageSeries(closes, 50, false))
+        if ("SMA200" in selectedAverages) add("SMA200" to movingAverageSeries(closes, 200, false))
+        if ("EMA12" in selectedAverages) add("EMA12" to movingAverageSeries(closes, 12, true))
+        if ("EMA26" in selectedAverages) add("EMA26" to movingAverageSeries(closes, 26, true))
+    }
+    val values = plotted.flatMap { listOf(it.high, it.low) } + overlays.flatMap { it.second.filterNotNull() }
     val min = values.minOrNull() ?: return
     val max = values.maxOrNull() ?: return
     val range = (max - min).takeIf { it > 0.0 } ?: 1.0
@@ -848,6 +959,18 @@ private fun PortfolioFinancialChart(candles: List<Candle>, style: PortfolioChart
                             val bottom = y(minOf(candle.open, candle.close))
                             val height = (bottom - top).coerceAtLeast(1.dp.toPx())
                             drawRect(color, Offset(x - bodyWidth / 2f, top), androidx.compose.ui.geometry.Size(bodyWidth, height))
+                        }
+                    }
+                }
+                overlays.forEach { (key, series) ->
+                    val color = averageColor(key)
+                    for (index in 0 until series.lastIndex) {
+                        val a = series[index]
+                        val b = series[index + 1]
+                        if (a != null && b != null) {
+                            val x1 = size.width * index / (series.size - 1).coerceAtLeast(1)
+                            val x2 = size.width * (index + 1) / (series.size - 1).coerceAtLeast(1)
+                            drawLine(color, Offset(x1, y(a)), Offset(x2, y(b)), strokeWidth = 1.8.dp.toPx(), cap = StrokeCap.Round)
                         }
                     }
                 }
