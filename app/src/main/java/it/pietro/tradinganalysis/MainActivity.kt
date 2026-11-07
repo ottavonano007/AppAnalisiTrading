@@ -653,13 +653,13 @@ private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(if (provider.isNotBlank()) "Fonte: $provider · \${visible.size} sedute" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (provider.isNotBlank()) "Fonte: $provider · ${visible.size} sedute" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (lastClose != null) {
                 Column(horizontalAlignment = Alignment.End) {
                     Text(fmt(lastClose), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     if (change != null) Text(
-                        "\${if (change >= 0) "+" else ""}\${fmt(change)}% · periodo mostrato",
+                        "${if (change >= 0) "+" else ""}${fmt(change)}% · periodo mostrato",
                         color = if (change >= 0) Color(0xFF81C784) else Color(0xFFE57373),
                         style = MaterialTheme.typography.labelSmall
                     )
@@ -674,7 +674,7 @@ private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (
             error != null -> Text("Grafico non disponibile: $error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             visible.size > 1 -> {
                 PortfolioMiniChart(visible)
-                Text("Ultime \${visible.size} sedute · dati giornalieri, non in tempo reale", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ultime ${visible.size} sedute · dati giornalieri, non in tempo reale", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
