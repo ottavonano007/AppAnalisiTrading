@@ -25,14 +25,13 @@ object TechnicalAnalysis {
         val previousVolumes = volumes.dropLast(1).takeLast(20)
         val averageVolume = previousVolumes.takeIf { it.size == 20 }?.average()
         val volumeRatio = if (averageVolume != null && averageVolume > 0 && volumes.last() > 0) volumes.last() / averageVolume else null
-        val ema12Series = emaSeries(closes, 12)
-        val ema26Series = emaSeries(closes, 26)
-        val macdSeries = closes.indices.map { i ->
-            val fast = ema12Series.getOrNull(i)
-            val slow = ema26Series.getOrNull(i)
+        val ema12Series = emaAligned(closes, 12)
+        val ema26Series = emaAligned(closes, 26)
+        val validMacd = closes.indices.mapNotNull { i ->
+            val fast = ema12Series[i]
+            val slow = ema26Series[i]
             if (fast != null && slow != null) fast - slow else null
         }
-        val validMacd = macdSeries.mapNotNull { it }
         val signal = emaSeries(validMacd, 9).lastOrNull()
         val bands = bollinger(closes)
         val atr = averageTrueRange(data)
@@ -62,6 +61,19 @@ object TechnicalAnalysis {
 
     private fun averageLast(values: List<Double>, period: Int): Double? =
         values.takeLast(period).takeIf { it.size == period }?.average()
+
+    private fun emaAligned(values: List<Double>, period: Int): List<Double?> {
+        if (values.size < period) return List(values.size) { null }
+        val output = MutableList<Double?>(values.size) { null }
+        val multiplier = 2.0 / (period + 1.0)
+        var ema = values.take(period).average()
+        output[period - 1] = ema
+        for (i in period until values.size) {
+            ema = (values[i] - ema) * multiplier + ema
+            output[i] = ema
+        }
+        return output
+    }
 
     private fun emaSeries(values: List<Double>, period: Int): List<Double> {
         if (values.size < period) return emptyList()
