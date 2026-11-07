@@ -8,8 +8,14 @@ import java.net.URL
 import java.util.Locale
 
 /** Contract for replaceable market-data providers. */
+data class MarketDataResult(
+    val candles: List<Candle>,
+    val provider: String,
+    val note: String? = null
+)
+
 interface MarketDataSource {
-    suspend fun loadDaily(symbol: String): Result<List<Candle>>
+    suspend fun loadDaily(symbol: String): Result<MarketDataResult>
 }
 
 /**
@@ -17,7 +23,7 @@ interface MarketDataSource {
  * The response is validated explicitly so an HTML/error message is not mistaken for market data.
  */
 class StooqDataSource : MarketDataSource {
-    override suspend fun loadDaily(symbol: String): Result<List<Candle>> = withContext(Dispatchers.IO) {
+    override suspend fun loadDaily(symbol: String): Result<MarketDataResult> = withContext(Dispatchers.IO) {
         runCatching {
             val normalized = normalizeSymbol(symbol)
             require(normalized.matches(Regex("[a-z0-9.]{1,24}"))) { "Simbolo non valido" }
@@ -39,7 +45,7 @@ class StooqDataSource : MarketDataSource {
                 if (code !in 200..299) {
                     error("Stooq ha risposto HTTP $code: ${preview(body)}")
                 }
-                parseCsv(body, symbol)
+                MarketDataResult(parseCsv(body, symbol), "Stooq")
             } finally {
                 connection.disconnect()
             }
