@@ -100,7 +100,7 @@ class YahooFinanceDataSource : MarketDataSource {
                 val lows = quote.getJSONArray("low")
                 val closes = quote.getJSONArray("close")
                 val volumes = quote.optJSONArray("volume")
-                val formatter = DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneOffset.UTC)
+                val formatter = DateTimeFormatter.ISO_INSTANT
                 val candles = (0 until timestamps.length()).mapNotNull { i ->
                     if (opens.isNull(i) || highs.isNull(i) || lows.isNull(i) || closes.isNull(i)) return@mapNotNull null
                     val open = opens.optDouble(i, Double.NaN)
