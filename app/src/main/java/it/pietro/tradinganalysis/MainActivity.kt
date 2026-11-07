@@ -346,11 +346,13 @@ private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles
     var chartError by remember(symbol) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(symbol, candles, alphaApiKey, chartWindow) {
-        if (chartWindow.intradayRange != null && symbol.isNotBlank()) {
+        val intradayRange = chartWindow.intradayRange
+        val intradayInterval = chartWindow.intradayInterval ?: "5m"
+        if (intradayRange != null && symbol.isNotBlank()) {
             chartLoading = true
             chartError = null
             val result = YahooFinanceDataSource().loadIntraday(
-                symbol, chartWindow.intradayRange, chartWindow.intradayInterval ?: "5m"
+                symbol, intradayRange, intradayInterval
             )
             result.onSuccess { data ->
                 chartCandles = data.candles
@@ -367,8 +369,9 @@ private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles
         }
     }
 
-    val visibleChartCandles = if (chartWindow.intradayHours != null) {
-        val cutoff = java.time.Instant.now().minusSeconds(chartWindow.intradayHours * 3600)
+    val intradayHours = chartWindow.intradayHours
+    val visibleChartCandles = if (intradayHours != null) {
+        val cutoff = java.time.Instant.now().minusSeconds(intradayHours * 3600)
         chartCandles.filter { candle ->
             runCatching { java.time.Instant.parse(candle.date).isAfter(cutoff) }.getOrDefault(false)
         }
