@@ -42,6 +42,10 @@ jobs:
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
+          sdkmanager --install \
+  "platform-tools" \
+  "platforms;android-36" \
+  "build-tools;36.0.0"  
 
       # 5. Configura Gradle 8.13
       - name: Set up Gradle 8.13
