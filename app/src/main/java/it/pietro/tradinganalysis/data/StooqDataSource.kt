@@ -31,8 +31,8 @@ class StooqDataSource : MarketDataSource {
             val url = URL("https://stooq.com/q/d/l/?s=$normalized&i=d")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 10_000
-                readTimeout = 15_000
+                connectTimeout = 3_000
+                readTimeout = 4_000
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 15) AnalisiTrading/0.1")
                 setRequestProperty("Accept", "text/csv,text/plain,*/*")
