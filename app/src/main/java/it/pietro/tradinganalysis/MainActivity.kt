@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -358,6 +359,10 @@ private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles
 
 @Composable
 private fun SnapshotCard(symbol: String, s: TechnicalSnapshot, candles: List<Candle>, level: AnalysisLevel) {
+    var selectedAverages by remember(symbol) { mutableStateOf(setOf<String>()) }
+    val onToggleAverage: (String) -> Unit = { key ->
+        selectedAverages = if (key in selectedAverages) selectedAverages - key else selectedAverages + key
+    }
     CardBlock {
         SelectionContainer {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -370,11 +375,11 @@ private fun SnapshotCard(symbol: String, s: TechnicalSnapshot, candles: List<Can
                     AnalysisLevel.ADVANCED -> metricValues(s).take(10)
                     AnalysisLevel.EXPERT -> metricValues(s)
                 })
-                if (level != AnalysisLevel.BASE) MovingAveragePanel(s)
+                if (level != AnalysisLevel.BASE) MovingAveragePanel(s, selectedAverages, onToggleAverage)
                 Text("Indicatori descrittivi, non segnali automatici di acquisto o vendita.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (candles.size > 1) PriceLine(candles.takeLast(60).map { it.close })
+        if (candles.size > 1) PriceLine(candles, selectedAverages)
     }
 }
 
@@ -398,24 +403,44 @@ private fun metricValues(s: TechnicalSnapshot): List<Pair<String, String?>> = li
     "Osservazioni" to s.observations.toString()
 )
 
+private data class AverageLine(val key: String, val label: String, val value: Double?, val color: Color)
+
+private val averageLines = listOf(
+    AverageLine("SMA20", "SMA 20", null, Color(0xFFFFC857)),
+    AverageLine("SMA50", "SMA 50", null, Color(0xFF4FC3F7)),
+    AverageLine("SMA200", "SMA 200", null, Color(0xFFE57373)),
+    AverageLine("EMA12", "EMA 12", null, Color(0xFF81C784)),
+    AverageLine("EMA26", "EMA 26", null, Color(0xFFBA68C8))
+)
+
 @Composable
-private fun MovingAveragePanel(s: TechnicalSnapshot) {
+private fun MovingAveragePanel(
+    s: TechnicalSnapshot,
+    selected: Set<String>,
+    onToggle: (String) -> Unit
+) {
     val rows = listOf(
-        "SMA 20" to s.sma20,
-        "SMA 50" to s.sma50,
-        "SMA 200" to s.sma200,
-        "EMA 12" to s.ema12,
-        "EMA 26" to s.ema26
+        Triple("SMA20", "SMA 20", s.sma20),
+        Triple("SMA50", "SMA 50", s.sma50),
+        Triple("SMA200", "SMA 200", s.sma200),
+        Triple("EMA12", "EMA 12", s.ema12),
+        Triple("EMA26", "EMA 26", s.ema26)
     )
-    val available = rows.filter { it.second != null }
     val shortLong = if (s.sma50 != null && s.sma200 != null) {
         if (s.sma50 > s.sma200) "SMA 50 sopra SMA 200" else if (s.sma50 < s.sma200) "SMA 50 sotto SMA 200" else "SMA 50 e SMA 200 allineate"
     } else "Servono almeno 200 sedute per confrontare SMA 50 e SMA 200"
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Confronto medie mobili", fontWeight = FontWeight.SemiBold)
-        rows.forEach { (name, value) ->
+        Text("Confronto medie mobili · tocca per mostrarle sul grafico", fontWeight = FontWeight.SemiBold)
+        rows.forEach { (key, name, value) ->
+            val color = averageColor(key)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilterChip(
+                    selected = key in selected,
+                    onClick = { onToggle(key) },
+                    enabled = value != null,
+                    label = { Text(name, color = if (value != null) color else MaterialTheme.colorScheme.onSurfaceVariant) }
+                )
+                Spacer(Modifier.weight(1f))
                 Text(value?.let(::fmt) ?: "N/D", fontWeight = FontWeight.SemiBold)
                 if (value != null) {
                     val distance = (s.lastClose / value - 1.0) * 100.0
@@ -428,6 +453,14 @@ private fun MovingAveragePanel(s: TechnicalSnapshot) {
         Text(shortLong, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Le percentuali indicano la distanza della chiusura dalla media, non una previsione.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private fun averageColor(key: String): Color = when (key) {
+    "SMA20" -> Color(0xFFFFC857)
+    "SMA50" -> Color(0xFF4FC3F7)
+    "SMA200" -> Color(0xFFE57373)
+    "EMA12" -> Color(0xFF81C784)
+    else -> Color(0xFFBA68C8)
 }
 
 @Composable
@@ -446,18 +479,88 @@ private fun MetricGrid(values: List<Pair<String, String?>>) {
 }
 
 @Composable
-private fun PriceLine(values: List<Double>) {
-    if (values.size < 2) return
-    val min = values.minOrNull() ?: return
-    val max = values.maxOrNull() ?: return
-    val lineColor = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.fillMaxWidth().height(100.dp).padding(vertical = 8.dp)) {
-        val range = (max - min).takeIf { it > 0 } ?: 1.0
-        val points = values.mapIndexed { index, value ->
-            Offset(x = size.width * index / (values.size - 1), y = size.height - ((value - min) / range).toFloat() * size.height)
-        }
-        points.zipWithNext().forEach { (a, b) -> drawLine(lineColor, a, b, strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round) }
+private fun PriceLine(candles: List<Candle>, selected: Set<String>) {
+    if (candles.size < 2) return
+    val closes = candles.map { it.close }
+    val overlays = buildList {
+        if ("SMA20" in selected) add("SMA20" to movingAverageSeries(closes, 20, false))
+        if ("SMA50" in selected) add("SMA50" to movingAverageSeries(closes, 50, false))
+        if ("SMA200" in selected) add("SMA200" to movingAverageSeries(closes, 200, false))
+        if ("EMA12" in selected) add("EMA12" to movingAverageSeries(closes, 12, true))
+        if ("EMA26" in selected) add("EMA26" to movingAverageSeries(closes, 26, true))
     }
+    val start = (candles.size - 60).coerceAtLeast(0)
+    val visibleCloses = closes.drop(start)
+    val visibleOverlays = overlays.map { (key, values) -> key to values.drop(start) }
+    val allValues = visibleCloses + visibleOverlays.flatMap { it.second.filterNotNull() }
+    val min = allValues.minOrNull() ?: return
+    val max = allValues.maxOrNull() ?: return
+    val range = (max - min).takeIf { it > 0.0 } ?: 1.0
+    val priceColor = MaterialTheme.colorScheme.primary
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Prezzo e medie mobili · ultime ${visibleCloses.size} sedute", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Canvas(Modifier.fillMaxWidth().height(170.dp).padding(vertical = 8.dp)) {
+            fun point(index: Int, value: Double): Offset = Offset(
+                x = size.width * index / (visibleCloses.size - 1),
+                y = size.height - ((value - min) / range).toFloat() * size.height
+            )
+            visibleCloses.zipWithNext().forEachIndexed { index, (a, b) ->
+                drawLine(priceColor, point(index, a), point(index + 1, b), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+            }
+            visibleOverlays.forEach { (key, values) ->
+                val color = averageColor(key)
+                for (index in 0 until values.lastIndex) {
+                    val a = values[index]
+                    val b = values[index + 1]
+                    if (a != null && b != null) {
+                        drawLine(color, point(index, a), point(index + 1, b), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            LegendLine("Prezzo", priceColor)
+            overlays.forEach { (key, _) -> LegendLine(averageLabel(key), averageColor(key)) }
+        }
+    }
+}
+
+@Composable
+private fun LegendLine(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Canvas(Modifier.width(16.dp).height(3.dp)) { drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 3.dp.toPx()) }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+    }
+}
+
+private fun averageLabel(key: String): String = when (key) {
+    "SMA20" -> "SMA20"
+    "SMA50" -> "SMA50"
+    "SMA200" -> "SMA200"
+    "EMA12" -> "EMA12"
+    else -> "EMA26"
+}
+
+private fun movingAverageSeries(values: List<Double>, period: Int, exponential: Boolean): List<Double?> {
+    val output = MutableList<Double?>(values.size) { null }
+    if (values.size < period) return output
+    if (!exponential) {
+        var sum = values.take(period).sum()
+        output[period - 1] = sum / period
+        for (index in period until values.size) {
+            sum += values[index] - values[index - period]
+            output[index] = sum / period
+        }
+    } else {
+        val multiplier = 2.0 / (period + 1.0)
+        var ema = values.take(period).average()
+        output[period - 1] = ema
+        for (index in period until values.size) {
+            ema = (values[index] - ema) * multiplier + ema
+            output[index] = ema
+        }
+    }
+    return output
 }
 
 @Composable
