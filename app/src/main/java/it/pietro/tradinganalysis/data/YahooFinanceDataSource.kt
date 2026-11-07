@@ -19,7 +19,7 @@ class YahooFinanceDataSource : MarketDataSource {
         runCatching {
             val ticker = symbol.trim().uppercase()
             require(ticker.matches(Regex("[A-Z0-9.^=_-]{1,24}"))) { "Simbolo non valido" }
-            val url = URL("https://query1.finance.yahoo.com/v8/finance/chart/$ticker?range=1y&interval=1d&events=div%2Csplits")
+            val url = URL("https://query1.finance.yahoo.com/v8/finance/chart/$ticker?range=5y&interval=1d&events=div%2Csplits")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 12_000
