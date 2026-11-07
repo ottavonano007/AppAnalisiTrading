@@ -78,13 +78,13 @@ private fun TradingApp(store: LocalStore, apiKeyStore: ApiKeyStore) {
         val scope = rememberCoroutineScope()
         
 
-        fun analyze(target: String = symbol) {
+        fun analyze(target: String = symbol, targetMarket: MarketType = market) {
             val clean = target.trim().uppercase()
             if (loading) return
             if (clean.isBlank()) { status = "Inserisci un simbolo valido."; return }
-            if (market != MarketType.STOCK) {
+            if (targetMarket != MarketType.STOCK) {
                 snapshot = null; candles = emptyList(); analyzedSymbol = ""
-                status = "Feed non ancora integrato per ${market.label}. In questa versione il connettore Stooq è utilizzato solo per titoli azionari USA; nessun dato alternativo viene simulato."
+                status = "Feed non ancora integrato per ${targetMarket.label}. In questa versione i connettori disponibili sono utilizzati per titoli azionari USA; nessun dato alternativo viene simulato."
                 return
             }
             loading = true
@@ -105,7 +105,7 @@ private fun TradingApp(store: LocalStore, apiKeyStore: ApiKeyStore) {
                     status = if (computed != null) "Fonte: ${data.provider}. Ultima sessione: ${computed.lastDate}." + (data.note?.let { " $it." } ?: "") else "Dati insufficienti per l'analisi. Fonte: ${data.provider}."
                     if (computed != null) {
                         val summary = "Chiusura ${fmt(computed.lastClose)} · ${computed.observations} osservazioni · RSI ${computed.rsi14?.let { fmt(it) } ?: "n/d"}"
-                        val record = AnalysisRecord(System.currentTimeMillis(), clean, market.label, level.label,
+                        val record = AnalysisRecord(System.currentTimeMillis(), clean, targetMarket.label, level.label,
                             LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")), summary)
                         store.addHistory(record)
                         history = store.history()
@@ -147,7 +147,7 @@ private fun TradingApp(store: LocalStore, apiKeyStore: ApiKeyStore) {
                             val updated = portfolios.toMutableMap()
                             updated[name] = updated[name].orEmpty() - ticker
                             portfolios = updated; store.savePortfolios(updated)
-                        }, onAnalyze = { symbol = it; market = MarketType.STOCK; tab = 0; analyze(it) })
+                        }, onAnalyze = { symbol = it; market = MarketType.STOCK; tab = 2; analyze(it, MarketType.STOCK) })
                     2 -> AnalysisScreen(analyzedSymbol, snapshot, candles, level, { level = it }, mode, { mode = it }, status, ::analyze)
                     else -> HistoryScreen(history, onOpen = { symbol = it; market = MarketType.STOCK; tab = 0; analyze(it) })
                 }
@@ -415,7 +415,7 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
             CardBlock {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium); Text("Dato non aggiornato finché non avvii l'analisi", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    TextButton(onClick = { onAnalyze(ticker) }) { Text("Analizza") }
+                    TextButton(onClick = { onAnalyze(ticker) }) { Text("Scheda tecnica") }
                     TextButton(onClick = { onRemove(selected, ticker) }) { Text("Rimuovi") }
                 }
             }
