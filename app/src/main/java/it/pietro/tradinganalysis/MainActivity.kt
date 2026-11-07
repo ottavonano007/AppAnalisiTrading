@@ -33,8 +33,10 @@ import it.pietro.tradinganalysis.data.AlphaVantageDataSource
 import it.pietro.tradinganalysis.data.FallbackMarketDataSource
 import it.pietro.tradinganalysis.data.StooqDataSource
 import it.pietro.tradinganalysis.data.YahooFinanceDataSource
+import it.pietro.tradinganalysis.data.SymbolSearchDataSource
 import it.pietro.tradinganalysis.domain.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -236,10 +238,65 @@ private fun MarketScreen(
         item {
             CardBlock {
                 Text("Strumento", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(value = symbol, onValueChange = onSymbol, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Ticker / simbolo") }, placeholder = { Text("Es. AAPL") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters))
-                Text("Fonti in sequenza: Stooq → Yahoo Finance → Alpha Vantage · dati giornalieri", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                var suggestions by remember { mutableStateOf<List<it.pietro.tradinganalysis.data.SymbolSuggestion>>(emptyList()) }
+                var suggestionsExpanded by remember { mutableStateOf(false) }
+                var selectedTicker by remember { mutableStateOf("") }
+                var searchFinished by remember { mutableStateOf(false) }
+                LaunchedEffect(symbol, market) {
+                    val query = symbol.trim()
+                    if (market != MarketType.STOCK || query.length < 2 || query.equals(selectedTicker, ignoreCase = true)) {
+                        suggestions = emptyList()
+                        suggestionsExpanded = false
+                        searchFinished = false
+                    } else {
+                        delay(350)
+                        val result = SymbolSearchDataSource().search(query)
+                        suggestions = result.getOrElse { emptyList() }
+                        searchFinished = result.isSuccess
+                        suggestionsExpanded = suggestions.isNotEmpty()
+                    }
+                }
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedTextField(value = symbol, onValueChange = {
+                        selectedTicker = ""
+                        onSymbol(it.uppercase())
+                    }, modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Ticker o nome dell'azienda") }, placeholder = { Text("Es. AAPL oppure Apple") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters))
+                    DropdownMenu(
+                        expanded = suggestionsExpanded && suggestions.isNotEmpty(),
+                        onDismissRequest = { suggestionsExpanded = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        suggestions.forEach { suggestion ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("${suggestion.symbol} · ${suggestion.name}", fontWeight = FontWeight.SemiBold)
+                                        Text("${suggestion.exchange} · ${suggestion.type}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                },
+                                onClick = {
+                                    selectedTicker = suggestion.symbol
+                                    onSymbol(suggestion.symbol)
+                                    suggestionsExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                if (symbol.trim().length >= 2 && market == MarketType.STOCK) {
+                    Text(
+                        when {
+                            suggestions.isNotEmpty() -> "Seleziona uno strumento dall'elenco per compilare il ticker."
+                            searchFinished -> "Nessun risultato trovato. Puoi comunque inserire il ticker manualmente."
+                            else -> "Ricerca suggerimenti in corso…"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text("Ricerca assistita tramite Yahoo Finance · fonti dati: Stooq → Yahoo Finance → Alpha Vantage", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onClick = onProviderSettings, modifier = Modifier.fillMaxWidth()) { Text("Configura Alpha Vantage") }
                 Button(onClick = { onAnalyze(symbol) }, enabled = !loading && symbol.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                     if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Avvia analisi")
