@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import it.pietro.tradinganalysis.data.LocalStore
 import it.pietro.tradinganalysis.data.ApiKeyStore
 import it.pietro.tradinganalysis.data.AlphaVantageDataSource
@@ -267,7 +268,8 @@ private fun MarketScreen(
                     DropdownMenu(
                         expanded = suggestionsExpanded && suggestions.isNotEmpty(),
                         onDismissRequest = { suggestionsExpanded = false },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        properties = PopupProperties(focusable = false)
                     ) {
                         suggestions.forEach { suggestion ->
                             DropdownMenuItem(
@@ -563,11 +565,22 @@ private fun movingAverageSeries(values: List<Double>, period: Int, exponential: 
     return output
 }
 
+private enum class PortfolioChartWindow(val label: String, val sessions: Int?) {
+    MONTH("1M", 21), THREE_MONTHS("3M", 63), SIX_MONTHS("6M", 126),
+    YEAR("1A", 252), THREE_YEARS("3A", 756), FIVE_YEARS("5A", 1260), ALL("Tutto", null)
+}
+
+private enum class PortfolioChartStyle(val label: String) {
+    CANDLE("Candele"), HEIKIN_ASHI("Heikin-Ashi"), OHLC("Barre OHLC"), LINE("Linea")
+}
+
 @Composable
 private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: String, alphaApiKey: String,
                             onSelect: (String) -> Unit, onCreate: () -> Unit,
                             onRemove: (String, String) -> Unit, onAnalyze: (String) -> Unit) {
     var chartView by remember { mutableStateOf(false) }
+    var chartWindow by remember { mutableStateOf(PortfolioChartWindow.SIX_MONTHS) }
+    var chartStyle by remember { mutableStateOf(PortfolioChartStyle.CANDLE) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -590,6 +603,35 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
                 FilterChip(selected = chartView, onClick = { chartView = true }, label = { Text("Grafici") })
             }
         }
+        if (chartView) {
+            item {
+                CardBlock {
+                    Text("Periodo del grafico", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(PortfolioChartWindow.MONTH, PortfolioChartWindow.THREE_MONTHS, PortfolioChartWindow.SIX_MONTHS, PortfolioChartWindow.YEAR).forEach {
+                            FilterChip(selected = chartWindow == it, onClick = { chartWindow = it }, label = { Text(it.label) })
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(PortfolioChartWindow.THREE_YEARS, PortfolioChartWindow.FIVE_YEARS, PortfolioChartWindow.ALL).forEach {
+                            FilterChip(selected = chartWindow == it, onClick = { chartWindow = it }, label = { Text(it.label) })
+                        }
+                    }
+                    Text("Tipo di grafico", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(PortfolioChartStyle.CANDLE, PortfolioChartStyle.HEIKIN_ASHI).forEach {
+                            FilterChip(selected = chartStyle == it, onClick = { chartStyle = it }, label = { Text(it.label) })
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(PortfolioChartStyle.OHLC, PortfolioChartStyle.LINE).forEach {
+                            FilterChip(selected = chartStyle == it, onClick = { chartStyle = it }, label = { Text(it.label) })
+                        }
+                    }
+                    Text("Asse X: tempo · Asse Y: prezzo nella valuta di quotazione.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         val symbols = portfolios[selected].orEmpty()
         if (symbols.isEmpty()) {
             item {
@@ -600,7 +642,7 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
             }
         } else if (chartView) {
             items(symbols, key = { "chart-$it" }) { ticker ->
-                PortfolioChartCard(ticker, alphaApiKey, onAnalyze, onRemove = { onRemove(selected, ticker) })
+                PortfolioChartCard(ticker, alphaApiKey, chartWindow, chartStyle, onAnalyze, onRemove = { onRemove(selected, ticker) })
             }
         } else {
             items(symbols, key = { "list-$it" }) { ticker ->
@@ -621,7 +663,14 @@ private fun PortfolioScreen(portfolios: Map<String, List<String>>, selected: Str
 }
 
 @Composable
-private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (String) -> Unit, onRemove: () -> Unit) {
+private fun PortfolioChartCard(
+    ticker: String,
+    alphaApiKey: String,
+    chartWindow: PortfolioChartWindow,
+    chartStyle: PortfolioChartStyle,
+    onAnalyze: (String) -> Unit,
+    onRemove: () -> Unit
+) {
     var candles by remember(ticker, alphaApiKey) { mutableStateOf<List<Candle>>(emptyList()) }
     var provider by remember(ticker, alphaApiKey) { mutableStateOf("") }
     var error by remember(ticker, alphaApiKey) { mutableStateOf<String?>(null) }
@@ -645,7 +694,7 @@ private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (
         loading = false
     }
 
-    val visible = candles.takeLast(60)
+    val visible = chartWindow.sessions?.let { candles.takeLast(it) } ?: candles
     val firstClose = visible.firstOrNull()?.close
     val lastClose = visible.lastOrNull()?.close
     val change = if (firstClose != null && firstClose != 0.0 && lastClose != null) (lastClose / firstClose - 1.0) * 100.0 else null
@@ -653,13 +702,13 @@ private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(ticker, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(if (provider.isNotBlank()) "Fonte: $provider · ${visible.size} sedute" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (provider.isNotBlank()) "Fonte: $provider · \${visible.size} sedute" else "Andamento storico", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (lastClose != null) {
                 Column(horizontalAlignment = Alignment.End) {
                     Text(fmt(lastClose), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     if (change != null) Text(
-                        "${if (change >= 0) "+" else ""}${fmt(change)}% · periodo mostrato",
+                        "\${if (change >= 0) "+" else ""}\${fmt(change)}% · periodo",
                         color = if (change >= 0) Color(0xFF81C784) else Color(0xFFE57373),
                         style = MaterialTheme.typography.labelSmall
                     )
@@ -673,8 +722,8 @@ private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (
             }
             error != null -> Text("Grafico non disponibile: $error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             visible.size > 1 -> {
-                PortfolioMiniChart(visible)
-                Text("Ultime ${visible.size} sedute · dati giornalieri, non in tempo reale", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PortfolioFinancialChart(visible, chartStyle)
+                Text("Periodo: \${visible.first().date} – \${visible.last().date} · \${visible.size} sedute", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
@@ -684,23 +733,100 @@ private fun PortfolioChartCard(ticker: String, alphaApiKey: String, onAnalyze: (
     }
 }
 
+private data class DisplayCandle(val date: String, val open: Double, val high: Double, val low: Double, val close: Double)
+
+private fun displayCandles(source: List<Candle>, style: PortfolioChartStyle): List<DisplayCandle> {
+    if (style != PortfolioChartStyle.HEIKIN_ASHI) {
+        return source.map { DisplayCandle(it.date, it.open, it.high, it.low, it.close) }
+    }
+    var previousOpen: Double? = null
+    var previousClose: Double? = null
+    return source.map { candle ->
+        val haClose = (candle.open + candle.high + candle.low + candle.close) / 4.0
+        val haOpen = if (previousOpen == null || previousClose == null) {
+            (candle.open + candle.close) / 2.0
+        } else {
+            (previousOpen + previousClose) / 2.0
+        }
+        val result = DisplayCandle(
+            candle.date, haOpen,
+            maxOf(candle.high, haOpen, haClose),
+            minOf(candle.low, haOpen, haClose),
+            haClose
+        )
+        previousOpen = haOpen
+        previousClose = haClose
+        result
+    }
+}
+
 @Composable
-private fun PortfolioMiniChart(candles: List<Candle>) {
-    val closes = candles.map { it.close }
-    val min = closes.minOrNull() ?: return
-    val max = closes.maxOrNull() ?: return
+private fun PortfolioFinancialChart(candles: List<Candle>, style: PortfolioChartStyle) {
+    val plotted = displayCandles(candles, style)
+    val values = plotted.flatMap { listOf(it.high, it.low) }
+    val min = values.minOrNull() ?: return
+    val max = values.maxOrNull() ?: return
     val range = (max - min).takeIf { it > 0.0 } ?: 1.0
+    val positive = Color(0xFF45C99A)
+    val negative = Color(0xFFE57373)
     val lineColor = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.fillMaxWidth().height(104.dp).padding(vertical = 6.dp)) {
-        val points = closes.mapIndexed { index, value ->
-            Offset(
-                x = size.width * index / (closes.size - 1).coerceAtLeast(1),
-                y = size.height - ((value - min) / range).toFloat() * size.height
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            when (style) {
+                PortfolioChartStyle.CANDLE -> "Candele giapponesi · verde rialzista / rosso ribassista"
+                PortfolioChartStyle.HEIKIN_ASHI -> "Heikin-Ashi · valori OHLC trasformati"
+                PortfolioChartStyle.OHLC -> "Barre OHLC · apertura, massimo, minimo e chiusura"
+                PortfolioChartStyle.LINE -> "Linea delle chiusure"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(Modifier.fillMaxWidth().height(156.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.width(54.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                Text(fmt(max), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(fmt((max + min) / 2.0), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(fmt(min), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Canvas(Modifier.weight(1f).fillMaxHeight()) {
+                fun y(value: Double): Float = size.height - ((value - min) / range).toFloat() * size.height
+                for (fraction in 0..4) {
+                    val gy = size.height * fraction / 4f
+                    drawLine(Color(0xFF354252), Offset(0f, gy), Offset(size.width, gy), strokeWidth = 1.dp.toPx())
+                }
+                if (style == PortfolioChartStyle.LINE) {
+                    val points = plotted.mapIndexed { index, candle ->
+                        Offset(size.width * index / (plotted.size - 1).coerceAtLeast(1), y(candle.close))
+                    }
+                    points.zipWithNext().forEach { (p1, p2) ->
+                        drawLine(lineColor, p1, p2, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    }
+                } else {
+                    val step = size.width / plotted.size
+                    val bodyWidth = (step * 0.62f).coerceIn(2.dp.toPx(), 12.dp.toPx())
+                    plotted.forEachIndexed { index, candle ->
+                        val x = step * (index + 0.5f)
+                        val rising = candle.close >= candle.open
+                        val color = if (rising) positive else negative
+                        drawLine(color, Offset(x, y(candle.high)), Offset(x, y(candle.low)), strokeWidth = 1.2.dp.toPx())
+                        if (style == PortfolioChartStyle.OHLC) {
+                            drawLine(color, Offset(x - bodyWidth / 2f, y(candle.open)), Offset(x, y(candle.open)), strokeWidth = 1.5.dp.toPx())
+                            drawLine(color, Offset(x, y(candle.close)), Offset(x + bodyWidth / 2f, y(candle.close)), strokeWidth = 1.5.dp.toPx())
+                        } else {
+                            val top = y(maxOf(candle.open, candle.close))
+                            val bottom = y(minOf(candle.open, candle.close))
+                            val height = (bottom - top).coerceAtLeast(1.dp.toPx())
+                            drawRect(color, Offset(x - bodyWidth / 2f, top), androidx.compose.ui.geometry.Size(bodyWidth, height))
+                        }
+                    }
+                }
+            }
         }
-        points.zipWithNext().forEach { (a, b) ->
-            drawLine(lineColor, a, b, strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(plotted.first().date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Tempo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(plotted.last().date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text("Valore: prezzo nella valuta di quotazione", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 @Composable
