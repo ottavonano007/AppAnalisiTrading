@@ -340,35 +340,37 @@ private fun AnalysisScreen(symbol: String, snapshot: TechnicalSnapshot?, candles
                            status: String, alphaApiKey: String, onAnalyze: (String) -> Unit) {
     var chartWindow by remember { mutableStateOf(PortfolioChartWindow.SIX_MONTHS) }
     var chartStyle by remember { mutableStateOf(PortfolioChartStyle.CANDLE) }
-    var chartCandles by remember(symbol) { mutableStateOf(candles) }
-    var chartProvider by remember(symbol) { mutableStateOf("Storico analisi") }
+    var intradayCandles by remember(symbol) { mutableStateOf<List<Candle>>(emptyList()) }
+    var chartProvider by remember(symbol) { mutableStateOf("Storico giornaliero") }
     var chartLoading by remember(symbol) { mutableStateOf(false) }
     var chartError by remember(symbol) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(symbol, candles, alphaApiKey, chartWindow) {
+    // Carica la rete solo quando cambia titolo o finestra intraday:
+    // una nuova analisi giornaliera non deve rilanciare inutilmente la stessa richiesta.
+    LaunchedEffect(symbol, chartWindow) {
         val intradayRange = chartWindow.intradayRange
-        val intradayInterval = chartWindow.intradayInterval ?: "5m"
         if (intradayRange != null && symbol.isNotBlank()) {
             chartLoading = true
             chartError = null
             val result = YahooFinanceDataSource().loadIntraday(
-                symbol, intradayRange, intradayInterval
+                symbol, intradayRange, chartWindow.intradayInterval ?: "5m"
             )
             result.onSuccess { data ->
-                chartCandles = data.candles
+                intradayCandles = data.candles
                 chartProvider = data.provider
             }.onFailure { cause ->
-                chartCandles = emptyList()
+                intradayCandles = emptyList()
                 chartError = cause.message ?: "Dati intraday non disponibili."
             }
             chartLoading = false
         } else {
-            chartCandles = candles
             chartProvider = "Storico giornaliero"
             chartError = null
+            chartLoading = false
         }
     }
 
+    val chartCandles = if (chartWindow.intradayRange != null) intradayCandles else candles
     val intradayHours = chartWindow.intradayHours
     val visibleChartCandles = if (intradayHours != null) {
         val cutoff = java.time.Instant.now().minusSeconds(intradayHours * 3600)
@@ -664,9 +666,18 @@ private fun ChartWindowSelector(selected: PortfolioChartWindow, onSelect: (Portf
 
 @Composable
 private fun ChartStyleSelector(selected: PortfolioChartStyle, onSelect: (PortfolioChartStyle) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        PortfolioChartStyle.values().forEach { style ->
-            FilterChip(selected = selected == style, onClick = { onSelect(style) }, label = { Text(style.label, fontSize = 11.sp) })
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        PortfolioChartStyle.values().toList().chunked(2).forEach { rowStyles ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowStyles.forEach { style ->
+                    FilterChip(
+                        modifier = Modifier.weight(1f),
+                        selected = selected == style,
+                        onClick = { onSelect(style) },
+                        label = { Text(style.label, fontSize = 12.sp, maxLines = 1) }
+                    )
+                }
+            }
         }
     }
 }
