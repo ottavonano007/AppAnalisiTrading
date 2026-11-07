@@ -34,9 +34,9 @@ class YahooFinanceDataSource : MarketDataSource {
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 check(code in 200..299) { "Yahoo Finance HTTP $code" }
                 val root = JSONObject(body).getJSONObject("chart")
-                val error = root.optJSONObject("error")
-                check(error == null || error.isNull("code")) {
-                    error?.optString("description") ?: "Risposta Yahoo Finance non valida"
+                val chartError = root.optJSONObject("error")
+                check(chartError == null || chartError.isNull("code")) {
+                    chartError?.optString("description") ?: "Risposta Yahoo Finance non valida"
                 }
                 val result = root.getJSONArray("result").optJSONObject(0)
                     ?: error("Yahoo Finance non ha restituito dati per $ticker")
