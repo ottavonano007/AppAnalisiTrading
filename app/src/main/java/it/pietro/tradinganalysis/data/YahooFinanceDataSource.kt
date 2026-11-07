@@ -22,8 +22,8 @@ class YahooFinanceDataSource : MarketDataSource {
             val url = URL("https://query1.finance.yahoo.com/v8/finance/chart/$ticker?range=5y&interval=1d&events=div%2Csplits")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 12_000
-                readTimeout = 18_000
+                connectTimeout = 7_000
+                readTimeout = 10_000
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Android 15) AnalisiTrading/0.1")
                 setRequestProperty("Accept", "application/json")
