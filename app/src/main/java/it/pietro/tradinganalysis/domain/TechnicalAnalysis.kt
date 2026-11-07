@@ -25,11 +25,32 @@ object TechnicalAnalysis {
         val previousVolumes = volumes.dropLast(1).takeLast(20)
         val averageVolume = previousVolumes.takeIf { it.size == 20 }?.average()
         val volumeRatio = if (averageVolume != null && averageVolume > 0 && volumes.last() > 0) volumes.last() / averageVolume else null
+        val ema12Series = emaSeries(closes, 12)
+        val ema26Series = emaSeries(closes, 26)
+        val macdSeries = closes.indices.map { i ->
+            val fast = ema12Series.getOrNull(i)
+            val slow = ema26Series.getOrNull(i)
+            if (fast != null && slow != null) fast - slow else null
+        }
+        val validMacd = macdSeries.mapNotNull { it }
+        val signal = emaSeries(validMacd, 9).lastOrNull()
+        val bands = bollinger(closes)
+        val atr = averageTrueRange(data)
+        val stochastic = stochasticK(data)
         return TechnicalSnapshot(
             lastClose = last,
             changePercent = previous?.takeIf { it != 0.0 }?.let { (last / it - 1.0) * 100.0 },
-            sma20 = closes.takeLast(20).takeIf { it.size == 20 }?.average(),
-            sma50 = closes.takeLast(50).takeIf { it.size == 50 }?.average(),
+            sma20 = averageLast(closes, 20),
+            sma50 = averageLast(closes, 50),
+            sma200 = averageLast(closes, 200),
+            ema12 = ema12Series.lastOrNull(),
+            ema26 = ema26Series.lastOrNull(),
+            macd = validMacd.lastOrNull(),
+            macdSignal = signal,
+            bollingerUpper = bands?.first,
+            bollingerLower = bands?.second,
+            atr14 = atr,
+            stochasticK14 = stochastic,
             rsi14 = calculateRsi(closes),
             annualizedVolatility = volatility,
             volumeVs20DayAverage = volumeRatio,
@@ -37,6 +58,48 @@ object TechnicalAnalysis {
             observations = data.size,
             lastDate = data.last().date
         )
+    }
+
+    private fun averageLast(values: List<Double>, period: Int): Double? =
+        values.takeLast(period).takeIf { it.size == period }?.average()
+
+    private fun emaSeries(values: List<Double>, period: Int): List<Double> {
+        if (values.size < period) return emptyList()
+        val multiplier = 2.0 / (period + 1.0)
+        val output = ArrayList<Double>(values.size - period + 1)
+        var ema = values.take(period).average()
+        output += ema
+        values.drop(period).forEach { value ->
+            ema = (value - ema) * multiplier + ema
+            output += ema
+        }
+        return output
+    }
+
+    private fun bollinger(closes: List<Double>): Pair<Double, Double>? {
+        val window = closes.takeLast(20).takeIf { it.size == 20 } ?: return null
+        val mean = window.average()
+        val deviation = sqrt(window.sumOf { (it - mean).pow(2) } / window.size)
+        return (mean + 2.0 * deviation) to (mean - 2.0 * deviation)
+    }
+
+    private fun averageTrueRange(data: List<Candle>): Double? {
+        if (data.size < 15) return null
+        val ranges = data.zipWithNext().map { (previous, current) ->
+            maxOf(
+                current.high - current.low,
+                kotlin.math.abs(current.high - previous.close),
+                kotlin.math.abs(current.low - previous.close)
+            )
+        }
+        return ranges.takeLast(14).takeIf { it.size == 14 }?.average()
+    }
+
+    private fun stochasticK(data: List<Candle>): Double? {
+        val window = data.takeLast(14).takeIf { it.size == 14 } ?: return null
+        val highest = window.maxOf { it.high }
+        val lowest = window.minOf { it.low }
+        return if (highest > lowest) (window.last().close - lowest) / (highest - lowest) * 100.0 else null
     }
 
     private fun calculateRsi(closes: List<Double>): Double? {
