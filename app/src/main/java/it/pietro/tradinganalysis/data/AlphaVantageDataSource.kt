@@ -21,8 +21,8 @@ class AlphaVantageDataSource(private val apiKey: String) : MarketDataSource {
             val url = URL("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=$encodedSymbol&outputsize=compact&apikey=$encodedKey")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 12_000
-                readTimeout = 18_000
+                connectTimeout = 7_000
+                readTimeout = 10_000
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("User-Agent", "AnalisiTrading/0.1 (Android)")
             }
