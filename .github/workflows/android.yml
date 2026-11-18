@@ -75,7 +75,7 @@ jobs:
             | group_by(.name)[]
             | sort_by(.created_at)
             | reverse
-            | .[3:][]
+            | .[1:][]
             | .id
           ')
           for artifact_id in "${obsolete[@]}"; do
