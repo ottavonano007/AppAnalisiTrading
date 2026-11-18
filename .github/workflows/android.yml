@@ -57,8 +57,6 @@ jobs:
         with:
           name: analisi-trading-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 5
       - name: Keep only the 3 latest APK artifacts
         env:
           GH_TOKEN: ${{ github.token }}
