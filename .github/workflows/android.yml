@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   build:
@@ -56,3 +57,31 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+- name: Keep only the 3 latest APK artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          ARTIFACT_NAMES: '["analisi-trading-debug-apk"]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GH_REPOSITORY}/actions/artifacts?per_page=100"
+          response=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$api") || {
+            echo "::warning::Impossibile consultare gli Artifacts: pulizia rinviata."
+            exit 0
+          }
+          mapfile -t obsolete < <(printf '%s' "$response" | jq -r --argjson names "$ARTIFACT_NAMES" '
+            [.artifacts[] | select(.expired == false) | select(.name as $n | ($names | index($n)) != null)]
+            | group_by(.name)[]
+            | sort_by(.created_at)
+            | reverse
+            | .[3:][]
+            | .id
+          ')
+          for artifact_id in "${obsolete[@]}"; do
+            if ! curl -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${GH_REPOSITORY}/actions/artifacts/${artifact_id}" >/dev/null; then
+              echo "::warning::Non è stato possibile eliminare l'Artifact ${artifact_id}."
+            else
+              echo "Eliminato Artifact obsoleto: ${artifact_id}"
+            fi
+          done
